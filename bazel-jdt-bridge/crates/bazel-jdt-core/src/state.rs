@@ -51,10 +51,17 @@ impl BazelJdtState {
         bazel_path: &str,
         cache_dir: &std::path::Path,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        log::info!("BazelJdtState::new: entry, workspace_root={:?}, bazel_path={}, cache_dir={:?}",
+                   workspace_root, bazel_path, cache_dir);
+
+        log::info!("BazelJdtState::new: opening cache");
         let cache = BazelCache::open(cache_dir)?;
+        log::info!("BazelJdtState::new: cache opened successfully");
+
         let graph = DependencyGraph::new();
         let parser = BuildFileParser::new();
 
+        log::info!("BazelJdtState::new: calling extract_if_needed");
         let aspect_label = match crate::aspect::extract_if_needed(&workspace_root, bazel_path) {
             Ok(label) => label,
             Err(e) => {

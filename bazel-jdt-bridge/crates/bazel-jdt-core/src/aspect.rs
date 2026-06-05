@@ -114,26 +114,37 @@ pub fn version_hash(bazel_major: u32) -> String {
 /// Extract aspect files to the workspace if the embedded version differs from
 /// what's already on disk. Returns the workspace-relative Bazel aspect label.
 pub fn extract_if_needed(workspace_root: &Path, bazel_path: &str) -> Result<String, AspectError> {
+    log::info!("extract_if_needed: starting aspect extraction check");
     let bazel_major = detect_bazel_major_version(bazel_path);
+    log::info!("extract_if_needed: detected bazel major version={}", bazel_major);
+
     let dir_name = aspect_dir_name();
+    log::info!("extract_if_needed: aspect dir name={}", dir_name);
+
     let aspect_dir = workspace_root.join(&dir_name);
     let version_path = aspect_dir.join(VERSION_FILE);
     let current_hash = version_hash(bazel_major);
+    log::info!("extract_if_needed: current hash={}", &current_hash[..8]);
 
     let needs_extraction = !matches!(
         fs::read_to_string(&version_path),
         Ok(stored_hash) if stored_hash == current_hash
     );
+    log::info!("extract_if_needed: needs_extraction={}", needs_extraction);
 
     if needs_extraction {
+        log::info!("extract_if_needed: creating aspect dir: {}", aspect_dir.display());
         fs::create_dir_all(&aspect_dir)?;
 
-        for (name, content) in aspect_files() {
+        let aspect_files_list = aspect_files();
+        log::info!("extract_if_needed: writing {} aspect files", aspect_files_list.len());
+        for (name, content) in aspect_files_list {
             let final_content = if name == "intellij_info_bundled.bzl" {
                 adapt_bundled_bzl_for_version(content, bazel_major)
             } else {
                 content.to_string()
             };
+            log::debug!("extract_if_needed: writing file: {}", name);
             fs::write(aspect_dir.join(name), final_content)?;
         }
 
@@ -145,6 +156,8 @@ pub fn extract_if_needed(workspace_root: &Path, bazel_path: &str) -> Result<Stri
             &current_hash[..8],
             bazel_major
         );
+    } else {
+        log::info!("extract_if_needed: aspect files already up to date, skipping extraction");
     }
 
     let label = format!(

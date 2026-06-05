@@ -114,9 +114,12 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeInitialize(
     )
     .try_init();
 
+    log::info!("nativeInitialize: entry point reached");
+
     let workspace: String = match env.get_string(&workspace_path) {
         Ok(s) => s.into(),
         Err(_) => {
+            log::error!("nativeInitialize: failed to parse workspace_path from JNI");
             let _ = env.throw_new(
                 "java/lang/IllegalArgumentException",
                 "Invalid workspace path",
@@ -125,21 +128,29 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeInitialize(
         }
     };
 
+    log::info!("nativeInitialize: parsed workspace_path successfully");
+
     let bazel: String = match env.get_string(&bazel_path) {
         Ok(s) => s.into(),
         Err(_) => {
+            log::error!("nativeInitialize: failed to parse bazel_path from JNI");
             let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid bazel path");
             return -1;
         }
     };
 
+    log::info!("nativeInitialize: parsed bazel_path successfully");
+
     let cache: String = match env.get_string(&cache_dir) {
         Ok(s) => s.into(),
         Err(_) => {
+            log::error!("nativeInitialize: failed to parse cache_dir from JNI");
             let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid cache dir");
             return -1;
         }
     };
+
+    log::info!("nativeInitialize: parsed cache_dir successfully");
 
     let cache_path = std::path::PathBuf::from(&cache);
 
@@ -164,10 +175,16 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeInitialize(
         }
     }
 
+    log::info!("nativeInitialize: creating BazelJdtState");
+
     let state = match BazelJdtState::new(std::path::PathBuf::from(&workspace), &bazel, &cache_path)
     {
-        Ok(s) => s,
+        Ok(s) => {
+            log::info!("nativeInitialize: BazelJdtState created successfully");
+            s
+        },
         Err(e) => {
+            log::error!("nativeInitialize: BazelJdtState creation failed: {}", e);
             let _ = env.throw_new(
                 "java/lang/RuntimeException",
                 format!("Initialization failed: {}", e),
@@ -194,6 +211,7 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeInitialize(
         reg.insert(key, Box::new(state));
     }
 
+    log::info!("nativeInitialize: returning handle");
     key as jlong
 }
 
@@ -362,9 +380,13 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeQueryTargets(
     handle: jlong,
     scope_patterns: JObjectArray,
 ) -> jobjectArray {
+    log::info!("nativeQueryTargets: entry point reached");
     let state = match get_state(&mut env, handle) {
         Some(s) => s,
-        None => return std::ptr::null_mut(),
+        None => {
+            log::error!("nativeQueryTargets: failed to get state for handle");
+            return std::ptr::null_mut();
+        }
     };
     state.set_sync_state(SyncState::Syncing);
 
@@ -427,9 +449,13 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativePopulateGraph(
     _class: JClass,
     handle: jlong,
 ) {
+    log::info!("nativePopulateGraph: entry point reached");
     let state = match get_state(&mut env, handle) {
         Some(s) => s,
-        None => return,
+        None => {
+            log::error!("nativePopulateGraph: failed to get state for handle");
+            return;
+        }
     };
 
     log::info!("nativePopulateGraph: parsing BUILD files");
@@ -448,9 +474,13 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeRunAspectBuild(
     build_flags: JObjectArray,
     sync_mode: JString,
 ) -> jobjectArray {
+    log::info!("nativeRunAspectBuild: entry point reached");
     let state = match get_state(&mut env, handle) {
         Some(s) => s,
-        None => return std::ptr::null_mut(),
+        None => {
+            log::error!("nativeRunAspectBuild: failed to get state for handle");
+            return std::ptr::null_mut();
+        }
     };
 
     let full_jars = env
@@ -568,19 +598,25 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeComputeClasspath(
     target_label: JString,
     build_flags: JObjectArray,
 ) -> jobjectArray {
+    log::info!("nativeComputeClasspath: entry point reached");
     let state = match get_state(&mut env, handle) {
         Some(s) => s,
-        None => return std::ptr::null_mut(),
+        None => {
+            log::error!("nativeComputeClasspath: failed to get state for handle");
+            return std::ptr::null_mut();
+        }
     };
 
     let label: String = match env.get_string(&target_label) {
         Ok(s) => s.into(),
         Err(_) => {
+            log::error!("nativeComputeClasspath: failed to parse target_label from JNI");
             let _ = env.throw_new("java/lang/IllegalArgumentException", "Invalid target label");
             return std::ptr::null_mut();
         }
     };
     let label = bazel_graph::normalize_label(&label);
+    log::info!("nativeComputeClasspath: computing for target={}", label);
 
     let build_flags_vec = parse_java_string_array(&mut env, &build_flags);
     let build_flags_ref: Option<&[String]> = build_flags_vec.as_deref();
@@ -670,6 +706,7 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeComputeClasspath(
             }
         }
         Err(resolution_err) => {
+            log::error!("nativeComputeClasspath: classpath resolution failed for target={}, error={}", label, resolution_err);
             state.set_sync_state(SyncState::Error);
             let _ = env.throw_new(
                 "java/lang/RuntimeException",

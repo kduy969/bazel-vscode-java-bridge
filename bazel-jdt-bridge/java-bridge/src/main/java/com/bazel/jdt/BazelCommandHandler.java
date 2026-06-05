@@ -63,6 +63,8 @@ public class BazelCommandHandler implements IDelegateCommandHandler {
 
     private Object handleImportProject(List<Object> arguments) {
         try {
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "handleImportProject: starting with workspacePath=" + (arguments.size() > 0 ? arguments.get(0) : "null")));
             BazelBridge bridge = BazelBridge.getInstance();
             String workspacePath = arguments.size() > 0 ? String.valueOf(arguments.get(0)) : "";
             String bazelPath = arguments.size() > 1 ? String.valueOf(arguments.get(1)) : "bazel";
@@ -70,7 +72,11 @@ public class BazelCommandHandler implements IDelegateCommandHandler {
             if (cacheDir.isEmpty()) {
                 cacheDir = DEFAULT_CACHE_DIR;
             }
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "Before nativeInitialize: workspacePath=" + workspacePath + ", bazelPath=" + bazelPath));
             bridge.initialize(workspacePath, bazelPath, cacheDir);
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "After nativeInitialize: bridge initialized"));
 
             String[] scopePatterns = null;
             if (arguments.size() > 3 && arguments.get(3) instanceof List) {
@@ -107,7 +113,11 @@ public class BazelCommandHandler implements IDelegateCommandHandler {
                     "Sync mode set to: " + syncMode));
             }
 
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "Before discoverTargets"));
             String[] targets = bridge.discoverTargets(scopePatterns, bridge.getBuildFlags());
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "After discoverTargets: found " + (targets != null ? targets.length : 0) + " targets"));
 
             java.util.List<String> newTargetLabels = createProjectsForNewTargets(workspacePath, targets, bridge);
 

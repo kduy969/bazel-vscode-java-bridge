@@ -55,6 +55,11 @@ public final class BazelBridge {
                 jniExecutor = createExecutor();
             }
             handle = nativeInitialize(workspacePath, bazelPath, cacheDir);
+            java.util.logging.Logger logger = java.util.logging.Logger.getLogger("com.bazel.jdt");
+            logger.info("nativeInitialize returned handle=" + handle);
+            if (handle == -1) {
+                logger.severe("CRITICAL: nativeInitialize failed, handle is -1");
+            }
             lastWorkspacePath = workspacePath;
             lastBazelPath = bazelPath;
             lastCacheDir = cacheDir;
