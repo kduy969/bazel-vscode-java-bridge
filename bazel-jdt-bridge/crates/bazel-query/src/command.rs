@@ -143,6 +143,7 @@ impl BazelInvoker {
         build_flags: Option<&[String]>,
         full_jars: bool,
     ) -> Result<String, BazelError> {
+        log::info!("build_with_aspects_sync: entry, targets={}, aspect_file={}", targets.len(), aspect_file);
         let mut args = vec!["build".to_string()];
         if let Some(flags) = build_flags {
             args.extend(flags.iter().map(|s| s.to_string()));
@@ -159,14 +160,18 @@ impl BazelInvoker {
         args.push("--show_result=2147483647".to_string());
         args.extend(targets.iter().cloned());
 
+        log::info!("build_with_aspects_sync: executing bazel build with aspects");
         let output = run_bazel_command_sync(&self.bazel_path, &self.workspace_root, &args)?;
+        log::info!("build_with_aspects_sync: bazel build completed, exit_status={}", output.status);
 
         let stderr = String::from_utf8(output.stderr)?;
 
         if !output.status.success() {
             log::warn!(
-                "Aspect build completed with errors (--keep_going); partial results will be used"
+                "build_with_aspects_sync: bazel build completed with errors (--keep_going); partial results will be used"
             );
+        } else {
+            log::info!("build_with_aspects_sync: bazel build succeeded");
         }
 
         Ok(stderr)
@@ -208,12 +213,16 @@ impl BazelInvoker {
         build_flags: Option<&[String]>,
         full_jars: bool,
     ) -> Result<Vec<TargetIdeInfo>, BazelError> {
+        log::info!("resolve_full_classpath_sync: entry, targets={}", targets.len());
         if targets.is_empty() {
+            log::info!("resolve_full_classpath_sync: empty targets, returning empty classpath");
             return Ok(Vec::new());
         }
 
+        log::info!("resolve_full_classpath_sync: calling build_with_aspects_sync");
         let aspect_output =
             self.build_with_aspects_sync(targets, &self.aspect_label, build_flags, full_jars)?;
+        log::info!("resolve_full_classpath_sync: build_with_aspects_sync returned successfully");
 
         log::info!("Discovering aspect output files...");
         let stderr_files = crate::output::parse_aspect_output_locations(&aspect_output);
