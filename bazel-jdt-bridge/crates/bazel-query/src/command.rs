@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::fs;
 
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
@@ -28,6 +29,29 @@ fn normalize_path_separators(path: &str) -> String {
 #[cfg(not(target_os = "windows"))]
 fn normalize_path_separators(path: &str) -> String {
     path.to_string()
+}
+
+/// Write Bazel error details to a timestamped log file in .bazel-jdt
+/// Returns the path to the error file on success
+fn write_bazel_error_log(workspace_root: &Path, command: &str, stderr: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let error_dir = workspace_root.join(".bazel-jdt").join("errors");
+    fs::create_dir_all(&error_dir)?;
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let error_file = error_dir.join(format!("bazel_build_error_{}.log", timestamp));
+
+    let content = format!(
+        "=== Bazel Build Error Log ===\nTimestamp: {}\n\n=== Command ===\n{}\n\n=== Stderr ===\n{}\n",
+        timestamp, command, stderr
+    );
+
+    fs::write(&error_file, content)?;
+    let error_path = error_file.display().to_string();
+
+    Ok(error_path)
 }
 
 /// Error type for Bazel command execution
@@ -160,6 +184,9 @@ impl BazelInvoker {
         args.push("--show_result=2147483647".to_string());
         args.extend(targets.iter().cloned());
 
+        let full_command = format!("{} {}", &self.bazel_path, args.join(" "));
+        log::info!("build_with_aspects_sync: full command: {}", full_command);
+
         log::info!("build_with_aspects_sync: executing bazel build with aspects");
         let output = run_bazel_command_sync(&self.bazel_path, &self.workspace_root, &args)?;
         log::info!("build_with_aspects_sync: bazel build completed, exit_status={}", output.status);
@@ -167,9 +194,20 @@ impl BazelInvoker {
         let stderr = String::from_utf8(output.stderr)?;
 
         if !output.status.success() {
-            log::warn!(
-                "build_with_aspects_sync: bazel build completed with errors (--keep_going); partial results will be used"
-            );
+            match write_bazel_error_log(&self.workspace_root, &full_command, &stderr) {
+                Ok(error_file) => {
+                    log::warn!(
+                        "build_with_aspects_sync: bazel build failed; see error details in: {}",
+                        error_file
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "build_with_aspects_sync: bazel build failed; could not write error log: {}",
+                        e
+                    );
+                }
+            }
         } else {
             log::info!("build_with_aspects_sync: bazel build succeeded");
         }
