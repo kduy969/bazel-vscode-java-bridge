@@ -92,6 +92,9 @@ public class BazelClasspathContainer implements IClasspathContainer {
                                 "Skipping non-existent JAR: " + path));
                         }
                         return null;
+                    } else {
+                        LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                                "Found JAR: " + path));
                     }
                 }
                 IPath srcPath = sourcePath != null ? Path.fromPortableString(sourcePath) : null;

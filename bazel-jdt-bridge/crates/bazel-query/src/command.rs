@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::fs;
 
 #[cfg(unix)]
@@ -52,6 +53,65 @@ fn write_bazel_error_log(workspace_root: &Path, command: &str, stderr: &str) -> 
     let error_path = error_file.display().to_string();
 
     Ok(error_path)
+}
+
+fn log_system_memory(label: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("vm_stat").output() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            let mut page_size: u64 = 16384;
+            let mut free: u64 = 0;
+            let mut active: u64 = 0;
+            let mut inactive: u64 = 0;
+            let mut wired: u64 = 0;
+            let mut comp: u64 = 0;
+            for line in s.lines() {
+                let line = line.trim();
+                if let Some(rest) = line.strip_prefix("Mach Virtual Memory Statistics:") {
+                    if let Some(start) = rest.find('(') {
+                        if let Some(end) = rest.find(" bytes)") {
+                            if let Ok(ps) = rest[start + 1..end].trim_start_matches("page size of ").trim().parse::<u64>() {
+                                page_size = ps;
+                            }
+                        }
+                    }
+                }
+                let val = line.split(':').nth(1).and_then(|v| v.trim().trim_end_matches('.').parse::<u64>().ok()).unwrap_or(0);
+                if line.starts_with("Pages free") { free = val; }
+                else if line.starts_with("Pages active") { active = val; }
+                else if line.starts_with("Pages inactive") { inactive = val; }
+                else if line.starts_with("Pages wired down") { wired = val; }
+                else if line.starts_with("Pages occupied by compressor") { comp = val; }
+            }
+            let used = (active + inactive + wired + comp) * page_size;
+            let total = (free + active + inactive + wired + comp) * page_size;
+            log::info!(
+                "build_with_aspects_sync: system memory {}: used={:.1}GB total={:.1}GB",
+                label, used as f64 / 1e9, total as f64 / 1e9
+            );
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/meminfo") {
+            let mut total_kb: u64 = 0;
+            let mut available_kb: u64 = 0;
+            for line in s.lines() {
+                if line.starts_with("MemTotal:") {
+                    total_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                } else if line.starts_with("MemAvailable:") {
+                    available_kb = line.split_whitespace().nth(1).and_then(|v| v.parse().ok()).unwrap_or(0);
+                }
+            }
+            let total = total_kb * 1024;
+            let used = total.saturating_sub(available_kb * 1024);
+            log::info!(
+                "build_with_aspects_sync: system memory {}: used={:.1}GB total={:.1}GB",
+                label, used as f64 / 1e9, total as f64 / 1e9
+            );
+        }
+    }
 }
 
 /// Error type for Bazel command execution
@@ -184,11 +244,35 @@ impl BazelInvoker {
         args.push("--show_result=2147483647".to_string());
         args.extend(targets.iter().cloned());
 
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mem_profile_path = self.workspace_root.join(".bazel-jdt").join(format!("memory_profile_{}.txt", timestamp));
+        args.push(format!("--memory_profile={}", mem_profile_path.display()));
+        log::info!("build_with_aspects_sync: bazel heap profile -> {}", mem_profile_path.display());
+
         let full_command = format!("{} {}", &self.bazel_path, args.join(" "));
         log::info!("build_with_aspects_sync: full command: {}", full_command);
 
         log::info!("build_with_aspects_sync: executing bazel build with aspects");
+        log_system_memory("before build");
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let stop_clone = stop_flag.clone();
+        let monitor = std::thread::spawn(move || {
+            let mut elapsed = 0u64;
+            while !stop_clone.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                if stop_clone.load(Ordering::Relaxed) { break; }
+                elapsed += 30;
+                log_system_memory(&format!("during build ({}s)", elapsed));
+            }
+        });
+
         let output = run_bazel_command_sync(&self.bazel_path, &self.workspace_root, &args)?;
+        stop_flag.store(true, Ordering::Relaxed);
+        let _ = monitor.join();
+        log_system_memory(&format!("after build (exit={})", output.status));
         log::info!("build_with_aspects_sync: bazel build completed, exit_status={}", output.status);
 
         let stderr = String::from_utf8(output.stderr)?;
