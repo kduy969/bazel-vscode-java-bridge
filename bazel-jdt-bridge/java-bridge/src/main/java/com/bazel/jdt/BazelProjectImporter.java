@@ -37,6 +37,7 @@ public class BazelProjectImporter extends AbstractProjectImporter {
 
     @Override
     public void importToWorkspace(IProgressMonitor monitor) throws CoreException {
+        LOG.info("importToWorkspace");
         BazelBridge bridge = BazelBridge.getInstance();
         if (bridge.isInitialized()) {
             LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
@@ -45,6 +46,7 @@ public class BazelProjectImporter extends AbstractProjectImporter {
         }
 
         if (tryFastReload(monitor)) {
+            LOG.info("importToWorkspace fastReload");
             return;
         }
 

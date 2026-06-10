@@ -48,12 +48,17 @@ public class BazelClasspathManager {
                 "setClasspathContainer (" + context + "): setting " + javaProjects.length + " project(s)"));
             for (int i = 0; i < javaProjects.length; i++) {
                 try {
-                    int entryCount = containers[i].getClasspathEntries().length;
+                    String projectName = javaProjects[i].getProject().getName();
+                    org.eclipse.jdt.core.IClasspathEntry[] entries = containers[i].getClasspathEntries();
                     LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
-                        "  " + javaProjects[i].getProject().getName() + " -> " + entryCount + " entries"));
+                        "setClasspathContainer - project: " + projectName + " -> " + entries.length + " entries"));
+                    for (org.eclipse.jdt.core.IClasspathEntry entry : entries) {
+                        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                            "setClasspathContainer - entry: [" + entry.getEntryKind() + "] " + entry.getPath()));
+                    }
                 } catch (Exception e) {
                     LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
-                        "  Error getting entry count for project at index " + i + ": " + e.getMessage()));
+                        "  Error getting entries for project at index " + i + ": " + e.getMessage()));
                 }
             }
         }
