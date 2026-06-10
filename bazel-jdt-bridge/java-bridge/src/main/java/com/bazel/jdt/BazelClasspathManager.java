@@ -8,6 +8,7 @@ import org.eclipse.core.runtime.Platform;
 import org.eclipse.core.runtime.Status;
 import org.eclipse.jdt.core.IClasspathContainer;
 import org.eclipse.jdt.core.JavaCore;
+import org.eclipse.jdt.core.JavaModelException;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -23,6 +24,49 @@ public class BazelClasspathManager {
     private static final String CONFIG_CHANGED_SENTINEL = "__CONFIG_CHANGED__";
     private static final int BATCH_SIZE = 50;
 
+    /**
+     * Helper to log and call JavaCore.setClasspathContainer.
+     * Logs project names and entry counts for debugging classpath issues.
+     * @throws JavaModelException 
+     */
+    public static void logAndSetClasspathContainer(
+            org.eclipse.jdt.core.IJavaProject[] javaProjects,
+            IClasspathContainer[] containers,
+            String context) throws JavaModelException {
+        if (javaProjects == null || containers == null) {
+            LOG.log(new Status(IStatus.ERROR, "com.bazel.jdt",
+                "setClasspathContainer (" + context + "): null arrays provided"));
+        } else if (javaProjects.length == 0) {
+            LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                "setClasspathContainer (" + context + "): no projects to set"));
+        } else if (javaProjects.length != containers.length) {
+            LOG.log(new Status(IStatus.ERROR, "com.bazel.jdt",
+                "setClasspathContainer (" + context + "): array length mismatch - "
+                + javaProjects.length + " projects vs " + containers.length + " containers"));
+        } else {
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "setClasspathContainer (" + context + "): setting " + javaProjects.length + " project(s)"));
+            for (int i = 0; i < javaProjects.length; i++) {
+                try {
+                    int entryCount = containers[i].getClasspathEntries().length;
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "  " + javaProjects[i].getProject().getName() + " -> " + entryCount + " entries"));
+                } catch (Exception e) {
+                    LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                        "  Error getting entry count for project at index " + i + ": " + e.getMessage()));
+                }
+            }
+        }
+        JavaCore.setClasspathContainer(
+            BazelClasspathContainer.CONTAINER_PATH,
+            javaProjects,
+            containers,
+            null
+        );
+        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+            "setClasspathContainer (" + context + "): completed"));
+    }
+
     public static void setMergedClasspathContainer(IProject project) {
         setMergedClasspathContainer(project, false);
     }
@@ -33,12 +77,10 @@ public class BazelClasspathManager {
             if (!bridge.isInitialized()) {
                 LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
                     "Bridge not initialized, using empty container for " + project.getName()));
-                JavaCore.setClasspathContainer(
-                    BazelClasspathContainer.CONTAINER_PATH,
+                logAndSetClasspathContainer(
                     new org.eclipse.jdt.core.IJavaProject[]{JavaCore.create(project)},
                     new IClasspathContainer[]{BazelClasspathContainer.EMPTY},
-                    null
-                );
+                    "setMergedClasspathContainer (bridge not initialized)");
                 return;
             }
             List<String> targetLabels = TargetProjectMapping.readTargets(project);
@@ -63,12 +105,10 @@ public class BazelClasspathManager {
                 rawEntries, getTestSourcePatterns(project),
                 bridge.getDependencyResolutionMode(), project.getName());
             TargetProjectMapping.storeCachedClasspath(project, targetLabels.get(0), rawEntries);
-            JavaCore.setClasspathContainer(
-                BazelClasspathContainer.CONTAINER_PATH,
+            logAndSetClasspathContainer(
                 new org.eclipse.jdt.core.IJavaProject[]{JavaCore.create(project)},
                 new IClasspathContainer[]{container},
-                null
-            );
+                "setMergedClasspathContainer");
         } catch (Exception e) {
             LOG.log(new Status(IStatus.ERROR, "com.bazel.jdt",
                 "FAILED setMergedClasspathContainer for project " + project.getName() + ": " + e.getMessage(), e));
@@ -81,12 +121,10 @@ public class BazelClasspathManager {
             if (!bridge.isInitialized()) {
                 LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
                     "Bridge not initialized, using empty container for " + targetLabel));
-                JavaCore.setClasspathContainer(
-                    BazelClasspathContainer.CONTAINER_PATH,
+                logAndSetClasspathContainer(
                     new org.eclipse.jdt.core.IJavaProject[]{JavaCore.create(project)},
                     new IClasspathContainer[]{BazelClasspathContainer.EMPTY},
-                    null
-                );
+                    "setClasspathContainer (bridge not initialized)");
                 return;
             }
             String[] rawEntries = bridge.computeClasspath(targetLabel);
@@ -112,12 +150,10 @@ public class BazelClasspathManager {
                 rawEntries, getTestSourcePatterns(project),
                 bridge.getDependencyResolutionMode(), project.getName());
             TargetProjectMapping.storeCachedClasspath(project, targetLabel, rawEntries);
-            JavaCore.setClasspathContainer(
-                BazelClasspathContainer.CONTAINER_PATH,
+            logAndSetClasspathContainer(
                 new org.eclipse.jdt.core.IJavaProject[]{JavaCore.create(project)},
                 new IClasspathContainer[]{container},
-                null
-            );
+                "setClasspathContainer");
         } catch (Exception e) {
             LOG.log(new Status(IStatus.ERROR, "com.bazel.jdt",
                 "FAILED setClasspathContainer for " + targetLabel + " in project " + project.getName() + ": " + e.getMessage(), e));
@@ -191,6 +227,9 @@ public class BazelClasspathManager {
             IProject[] projects = workspace.getRoot().getProjects();
             BazelBridge bridge = BazelBridge.getInstance();
 
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "batchSetClasspathContainers: starting with " + projects.length + " projects (fromCache=" + fromCache + ")"));
+
             List<org.eclipse.jdt.core.IJavaProject> javaProjects = new ArrayList<>();
             List<IClasspathContainer> containers = new ArrayList<>();
             int skipped = 0;
@@ -206,9 +245,13 @@ public class BazelClasspathManager {
 
                 List<String> targetLabels = TargetProjectMapping.readTargets(project);
                 if (targetLabels.isEmpty()) {
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "Project '" + project.getName() + "' has no target labels, skipping"));
                     skipped++;
                     continue;
                 }
+                LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                    "Processing project '" + project.getName() + "' with " + targetLabels.size() + " target(s)"));
 
                 String[] rawEntries;
                 if (fromCache) {
@@ -217,16 +260,32 @@ public class BazelClasspathManager {
                         String[] cached = TargetProjectMapping.readCachedClasspath(project, label);
                         if (cached != null) {
                             java.util.Collections.addAll(allEntries, cached);
+                            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                                "Loaded " + cached.length + " cached entries for target '" + label + "'"));
+                        } else {
+                            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                                "No cached entries found for target '" + label + "'"));
                         }
                     }
                     if (allEntries.isEmpty()) {
+                        LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                            "No cached classpath entries for project '" + project.getName() + "', skipping"));
                         skipped++;
                         continue;
                     }
                     rawEntries = allEntries.toArray(new String[0]);
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "Using cached classpath: " + rawEntries.length + " entries for project '"
+                        + project.getName() + "'"));
                 } else {
                     String[] labels = targetLabels.toArray(new String[0]);
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "Computing classpath for project '" + project.getName() + "' with "
+                        + labels.length + " target(s): " + String.join(", ", labels)));
                     rawEntries = bridge.computeClasspathMerged(labels);
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "Computed " + rawEntries.length + " classpath entries for project '"
+                        + project.getName() + "'"));
                     TargetProjectMapping.storeCachedClasspath(project, targetLabels.get(0), rawEntries);
                 }
 
@@ -235,26 +294,36 @@ public class BazelClasspathManager {
                         rawEntries, getTestSourcePatterns(project),
                         bridge.getDependencyResolutionMode(),
                         project.getName());
-                    if (container.getClasspathEntries().length == 0) {
+                    int entryCount = container.getClasspathEntries().length;
+                    LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                        "Created container for project '" + project.getName() + "' with " + entryCount + " entries"));
+                    if (entryCount == 0) {
+                        LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                            "Container for project '" + project.getName() + "' has 0 entries, skipping"));
                         skipped++;
                         continue;
                     }
                     javaProjects.add(JavaCore.create(project));
                     containers.add(container);
                 } catch (Exception e) {
-                    LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
-                        "Failed to build container for " + project.getName() + ": " + e.getMessage()));
+                    LOG.log(new Status(IStatus.ERROR, "com.bazel.jdt",
+                        "Failed to build container for project '" + project.getName() + "': " + e.getMessage(), e));
                     skipped++;
                 }
             }
 
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
+                "batchSetClasspathContainers: processed " + (projects.length - skipped) + " projects, "
+                + "skipped " + skipped));
+
             if (!javaProjects.isEmpty()) {
-                JavaCore.setClasspathContainer(
-                    BazelClasspathContainer.CONTAINER_PATH,
+                logAndSetClasspathContainer(
                     javaProjects.toArray(new org.eclipse.jdt.core.IJavaProject[0]),
                     containers.toArray(new IClasspathContainer[0]),
-                    null
-                );
+                    "batchSetClasspathContainers");
+            } else {
+                LOG.log(new Status(IStatus.WARNING, "com.bazel.jdt",
+                    "batchSetClasspathContainers: no projects to set classpath containers for"));
             }
 
             long elapsed = System.currentTimeMillis() - startTime;

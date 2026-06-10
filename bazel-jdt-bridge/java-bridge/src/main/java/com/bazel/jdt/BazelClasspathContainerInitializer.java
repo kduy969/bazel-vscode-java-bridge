@@ -37,12 +37,10 @@ public class BazelClasspathContainerInitializer extends ClasspathContainerInitia
         if (IMPORT_IN_PROGRESS) {
             LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
                 "Skipping container resolve during import for project " + projectName));
-            JavaCore.setClasspathContainer(
-                BazelClasspathContainer.CONTAINER_PATH,
+            BazelClasspathManager.logAndSetClasspathContainer(
                 new IJavaProject[]{project},
                 new IClasspathContainer[]{BazelClasspathContainer.EMPTY},
-                null
-            );
+                "initialize (import in progress)");
             return;
         }
 
@@ -73,8 +71,7 @@ public class BazelClasspathContainerInitializer extends ClasspathContainerInitia
         LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
             "No persisted target labels for project '" + project.getProject().getName()
             + "' - setting empty container (importer will configure)"));
-        JavaCore.setClasspathContainer(
-            BazelClasspathContainer.CONTAINER_PATH,
+        BazelClasspathManager.logAndSetClasspathContainer(
             new IJavaProject[]{project},
             new IClasspathContainer[]{BazelClasspathContainer.EMPTY},
             null
@@ -106,12 +103,10 @@ public class BazelClasspathContainerInitializer extends ClasspathContainerInitia
                     + " reference stale artifacts — skipping cache recovery");
                 return false;
             }
-            JavaCore.setClasspathContainer(
-                BazelClasspathContainer.CONTAINER_PATH,
+            BazelClasspathManager.logAndSetClasspathContainer(
                 new IJavaProject[]{project},
                 new IClasspathContainer[]{container},
-                null
-            );
+                "tryRecoverFromCache");
             LOG.info("Recovered classpath from file cache for " + project.getProject().getName()
                 + " (" + container.getClasspathEntries().length + " entries)");
             return true;

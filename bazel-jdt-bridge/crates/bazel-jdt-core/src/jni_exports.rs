@@ -535,6 +535,36 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeRunAspectBuild(
                 total,
                 with_jars
             );
+
+            // Log each target with its kind and JARs after aspect build
+            for target_label in graph.all_targets() {
+                let kind = graph.get_target_kind(&target_label);
+                let kind_str = match kind {
+                    bazel_graph::TargetKind::JavaLibrary => "java_library",
+                    bazel_graph::TargetKind::JavaTest => "java_test",
+                    bazel_graph::TargetKind::JavaImport => "java_import",
+                    bazel_graph::TargetKind::JavaBinary => "java_binary",
+                    bazel_graph::TargetKind::Unknown => "unknown",
+                };
+
+                if let Some(jars) = graph.get_target_jars(&target_label) {
+                    let jar_paths: Vec<String> = jars.iter()
+                        .map(|j| j.effective_path().to_string())
+                        .collect();
+                    log::info!(
+                        "Target in graph: {} (kind={}) jars=[{}]",
+                        target_label,
+                        kind_str,
+                        jar_paths.join(", ")
+                    );
+                } else {
+                    log::info!(
+                        "Target in graph: {} (kind={}) jars=[]",
+                        target_label,
+                        kind_str
+                    );
+                }
+            }
         }
         Err(e) => {
             log::warn!(
@@ -772,8 +802,8 @@ pub extern "system" fn Java_com_bazel_jdt_BazelBridge_nativeComputeClasspathMerg
     ) {
         Ok(computed) => {
             let entries = computed.to_pipe_delimited_entries();
-            log::debug!(
-                "[bazel-jdt] nativeComputeClasspathMerged {} targets -> {} entries",
+            log::info!(
+                "nativeComputeClasspathMerged: {} targets -> {} entries",
                 label_strings.len(),
                 entries.len()
             );
