@@ -74,8 +74,8 @@ public class BazelClasspathContainerInitializer extends ClasspathContainerInitia
         BazelClasspathManager.logAndSetClasspathContainer(
             new IJavaProject[]{project},
             new IClasspathContainer[]{BazelClasspathContainer.EMPTY},
-            null
-        );
+            "doInitialize (no persisted labels)");
+
     }
 
     private boolean tryRecoverFromCache(IJavaProject project, BazelBridge bridge) {
