@@ -28,25 +28,36 @@ public class BazelProjectImporter extends AbstractProjectImporter {
 
     @Override
     public boolean applies(IProgressMonitor monitor) {
-        if (rootFolder == null) return false;
-        boolean hasWorkspace = new File(rootFolder, "WORKSPACE").exists()
+        if (rootFolder == null) {
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt", "applies: rootFolder is null"));
+            return false;
+        }
+
+        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt", "applies: checking rootFolder=" + rootFolder.getAbsolutePath()));
+
+        boolean appliesHasWorkspace = new File(rootFolder, "WORKSPACE").exists()
                 || new File(rootFolder, "WORKSPACE.bazel").exists();
-        if (!hasWorkspace) return false;
-        return new File(rootFolder, InternalConfig.bazelprojectRelPath()).exists();
+        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt", "applies: hasWorkspace=" + appliesHasWorkspace));
+        if (!appliesHasWorkspace) return false;
+
+        String applieBazelprojectPath = InternalConfig.bazelprojectRelPath();
+        boolean appliesHasBazelproject = new File(rootFolder, applieBazelprojectPath).exists();
+        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt", "applies: hasBazelproject=" + appliesHasBazelproject + " (path=" + applieBazelprojectPath + ")"));
+        return appliesHasBazelproject;
     }
 
     @Override
     public void importToWorkspace(IProgressMonitor monitor) throws CoreException {
-        LOG.info("importToWorkspace");
+        LOG.log(new Status(IStatus.INFO, "com.bazel.jdt","importToWorkspace start"));
         BazelBridge bridge = BazelBridge.getInstance();
         if (bridge.isInitialized()) {
             LOG.log(new Status(IStatus.INFO, "com.bazel.jdt",
                 "Bridge already initialized, skipping re-import"));
             return;
-        }
+        } 
 
         if (tryFastReload(monitor)) {
-            LOG.info("importToWorkspace fastReload");
+            LOG.log(new Status(IStatus.INFO, "com.bazel.jdt","importToWorkspace fastReload"));
             return;
         }
 
